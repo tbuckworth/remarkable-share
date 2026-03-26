@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Send to reMarkable</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#111111">
+  <link rel="icon" href="icon-192.png" type="image/png">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #fafafa; color: #111; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 24px 16px; }
+    h1 { font-size: 20px; margin-bottom: 20px; }
+    .card { background: white; border-radius: 12px; padding: 20px; width: 100%; max-width: 400px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    label { font-weight: 600; font-size: 14px; display: block; margin-bottom: 6px; }
+    input[type="url"], input[type="password"] { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; margin-bottom: 14px; font-family: monospace; }
+    select { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; margin-bottom: 14px; background: white; }
+    button { width: 100%; padding: 12px; background: #111; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
+    button:active { background: #333; }
+    button:disabled { background: #94a3b8; }
+    .status { margin-top: 12px; padding: 10px; border-radius: 8px; font-size: 14px; display: none; }
+    .status.success { display: block; background: #dcfce7; color: #166534; }
+    .status.error { display: block; background: #fef2f2; color: #991b1b; }
+    .status.loading { display: block; background: #f0f4ff; color: #1e40af; }
+    .settings { margin-top: 16px; width: 100%; max-width: 400px; }
+    .settings summary { cursor: pointer; color: #64748b; font-size: 13px; }
+    .settings-body { margin-top: 12px; }
+    .save-note { color: #166534; font-size: 13px; margin-top: 6px; display: none; }
+  </style>
+</head>
+<body>
+  <h1>Send to reMarkable</h1>
+
+  <div class="card">
+    <label for="url">URL</label>
+    <input type="url" id="url" placeholder="https://example.com/article">
+
+    <label for="folder">Folder</label>
+    <select id="folder"><option value="/">/  (root)</option></select>
+
+    <button id="send">Send to reMarkable</button>
+    <div class="status" id="status"></div>
+  </div>
+
+  <details class="settings card" style="margin-top:16px;">
+    <summary>Settings</summary>
+    <div class="settings-body">
+      <label for="serverUrl">Server URL</label>
+      <input type="url" id="serverUrl" placeholder="http://100.116.219.34:8417">
+      <label for="token">Auth Token</label>
+      <input type="password" id="token" placeholder="Your token">
+      <button id="saveSettings" style="background:#475569;">Save Settings</button>
+      <div class="save-note" id="saveNote">Saved!</div>
+    </div>
+  </details>
+
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js");
+    }
+
+    const urlEl = document.getElementById("url");
+    const folderEl = document.getElementById("folder");
+    const sendBtn = document.getElementById("send");
+    const statusEl = document.getElementById("status");
+
+    // Read shared URL from query params (Android share target)
+    const params = new URLSearchParams(location.search);
+    const sharedUrl = params.get("url") || params.get("text") || "";
+    if (sharedUrl) {
+      const urlMatch = sharedUrl.match(/https?:\/\/\S+/);
+      urlEl.value = urlMatch ? urlMatch[0] : sharedUrl;
+    }
+
+    // Settings
+    const serverUrlEl = document.getElementById("serverUrl");
+    const tokenEl = document.getElementById("token");
+    const saveBtn = document.getElementById("saveSettings");
+    const saveNote = document.getElementById("saveNote");
+
+    serverUrlEl.value = localStorage.getItem("rm_server_url") || "";
+    tokenEl.value = localStorage.getItem("rm_token") || "";
+
+    saveBtn.addEventListener("click", () => {
+      localStorage.setItem("rm_server_url", serverUrlEl.value.trim());
+      localStorage.setItem("rm_token", tokenEl.value.trim());
+      saveNote.style.display = "block";
+      setTimeout(() => { saveNote.style.display = "none"; }, 2000);
+      loadFolders();
+    });
+
+    // Load folders
+    async function loadFolders() {
+      const server = localStorage.getItem("rm_server_url");
+      const token = localStorage.getItem("rm_token");
+      if (!server || !token) return;
+      try {
+        const resp = await fetch(server + "/folders?token=" + token);
+        const data = await resp.json();
+        folderEl.innerHTML = '<option value="/">/  (root)</option>';
+        (data.folders || []).forEach(f => {
+          const opt = document.createElement("option");
+          opt.value = "/" + f;
+          opt.textContent = f;
+          folderEl.appendChild(opt);
+        });
+      } catch(e) {}
+    }
+    loadFolders();
+
+    // Auto-submit if URL came from share intent
+    const autoSubmit = sharedUrl && localStorage.getItem("rm_server_url") && localStorage.getItem("rm_token");
+
+    // Send
+    sendBtn.addEventListener("click", async () => {
+      const server = localStorage.getItem("rm_server_url");
+      const token = localStorage.getItem("rm_token");
+
+      if (!server || !token) {
+        show("Configure Server URL and token in Settings first.", "error");
+        return;
+      }
+      if (!urlEl.value.trim()) {
+        show("Enter a URL.", "error");
+        return;
+      }
+
+      sendBtn.disabled = true;
+      sendBtn.textContent = "Sending...";
+      show("Converting and uploading...", "loading");
+
+      try {
+        const resp = await fetch(server + "/convert", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token,
+          },
+          body: JSON.stringify({ url: urlEl.value.trim(), folder: folderEl.value }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          show("Sent: " + data.title, "success");
+          urlEl.value = "";
+        } else {
+          show(data.detail || "Error: " + resp.status, "error");
+        }
+      } catch (err) {
+        show("Network error: " + err.message, "error");
+      }
+
+      sendBtn.disabled = false;
+      sendBtn.textContent = "Send to reMarkable";
+    });
+
+    function show(msg, cls) {
+      statusEl.textContent = msg;
+      statusEl.className = "status " + cls;
+    }
+
+    // Auto-submit after short delay so user sees what's being sent
+    if (autoSubmit) {
+      setTimeout(() => sendBtn.click(), 500);
+    }
+  </script>
+</body>
+</html>
