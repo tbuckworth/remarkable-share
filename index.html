@@ -46,7 +46,7 @@
     <summary>Settings</summary>
     <div class="settings-body">
       <label for="serverUrl">Server URL</label>
-      <input type="url" id="serverUrl" placeholder="http://100.116.219.34:8417">
+      <input type="url" id="serverUrl" placeholder="https://titus-ms-7a59.tail310336.ts.net">
       <label for="token">Auth Token</label>
       <input type="password" id="token" placeholder="Your token">
       <button id="saveSettings" style="background:#475569;">Save Settings</button>
@@ -78,7 +78,7 @@
     const saveBtn = document.getElementById("saveSettings");
     const saveNote = document.getElementById("saveNote");
 
-    serverUrlEl.value = localStorage.getItem("rm_server_url") || "";
+    serverUrlEl.value = localStorage.getItem("rm_server_url") || "https://titus-ms-7a59.tail310336.ts.net";
     tokenEl.value = localStorage.getItem("rm_token") || "";
 
     saveBtn.addEventListener("click", () => {
