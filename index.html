@@ -78,8 +78,25 @@
     const saveBtn = document.getElementById("saveSettings");
     const saveNote = document.getElementById("saveNote");
 
-    serverUrlEl.value = localStorage.getItem("rm_server_url") || "https://titus-ms-7a59.tail310336.ts.net";
+    serverUrlEl.value = localStorage.getItem("rm_server_url") || "";
     tokenEl.value = localStorage.getItem("rm_token") || "";
+
+    // Auto-discover tunnel URL from tunnel.json (published by desktop cloudflared service)
+    async function discoverTunnel() {
+      try {
+        const resp = await fetch("tunnel.json?_=" + Date.now());
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.url) {
+          const current = localStorage.getItem("rm_server_url");
+          if (!current || current.includes("trycloudflare.com") || current.includes("tail310336.ts.net")) {
+            localStorage.setItem("rm_server_url", data.url);
+            serverUrlEl.value = data.url;
+          }
+        }
+      } catch(e) {}
+    }
+    discoverTunnel().then(() => loadFolders());
 
     saveBtn.addEventListener("click", () => {
       localStorage.setItem("rm_server_url", serverUrlEl.value.trim());
@@ -107,9 +124,6 @@
       } catch(e) {}
     }
     loadFolders();
-
-    // Auto-submit if URL came from share intent
-    const autoSubmit = sharedUrl && localStorage.getItem("rm_server_url") && localStorage.getItem("rm_token");
 
     // Send
     sendBtn.addEventListener("click", async () => {
@@ -158,9 +172,13 @@
       statusEl.className = "status " + cls;
     }
 
-    // Auto-submit after short delay so user sees what's being sent
-    if (autoSubmit) {
-      setTimeout(() => sendBtn.click(), 500);
+    // Auto-submit after tunnel discovery so URL is resolved
+    if (sharedUrl) {
+      discoverTunnel().then(() => {
+        if (localStorage.getItem("rm_server_url") && localStorage.getItem("rm_token")) {
+          setTimeout(() => sendBtn.click(), 500);
+        }
+      });
     }
   </script>
 </body>
