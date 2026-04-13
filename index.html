@@ -121,6 +121,7 @@
           opt.textContent = f;
           folderEl.appendChild(opt);
         });
+        restoreFolder();
       } catch(e) {}
     }
     loadFolders();
@@ -139,6 +140,7 @@
         return;
       }
 
+      localStorage.setItem("rm_last_folder", folderEl.value);
       sendBtn.disabled = true;
       sendBtn.textContent = "Sending...";
       show("Converting and uploading...", "loading");
@@ -172,13 +174,14 @@
       statusEl.className = "status " + cls;
     }
 
-    // Auto-submit after tunnel discovery so URL is resolved
-    if (sharedUrl) {
-      discoverTunnel().then(() => {
-        if (localStorage.getItem("rm_server_url") && localStorage.getItem("rm_token")) {
-          setTimeout(() => sendBtn.click(), 500);
+    // Restore last-used folder after folders load
+    function restoreFolder() {
+      const last = localStorage.getItem("rm_last_folder");
+      if (last) {
+        for (const opt of folderEl.options) {
+          if (opt.value === last) { folderEl.value = last; break; }
         }
-      });
+      }
     }
   </script>
 </body>
