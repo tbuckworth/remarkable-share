@@ -78,6 +78,29 @@
     const saveBtn = document.getElementById("saveSettings");
     const saveNote = document.getElementById("saveNote");
 
+    // Stable fallback (Tailscale endpoint doesn't rotate like Cloudflare quick tunnels)
+    const FALLBACK_SERVER = "https://titus-ms-7a59.tail310336.ts.net";
+
+    // Reject non-server hosts. api.trycloudflare.com is Cloudflare's API host,
+    // NOT a tunnel — the desktop publisher sometimes writes it by mistake.
+    function isValidServer(u) {
+      try {
+        const url = new URL(u);
+        if (!/^https?:$/.test(url.protocol)) return false;
+        if (url.hostname === "api.trycloudflare.com") return false;
+        return !!url.hostname;
+      } catch (e) { return false; }
+    }
+
+    // Self-heal: clear a previously cached bad value so discovery/fallback can recover.
+    const cached = localStorage.getItem("rm_server_url");
+    if (cached && !isValidServer(cached)) {
+      localStorage.removeItem("rm_server_url");
+    }
+    if (!localStorage.getItem("rm_server_url")) {
+      localStorage.setItem("rm_server_url", FALLBACK_SERVER);
+    }
+
     serverUrlEl.value = localStorage.getItem("rm_server_url") || "";
     tokenEl.value = localStorage.getItem("rm_token") || "";
 
@@ -87,9 +110,11 @@
         const resp = await fetch("tunnel.json?_=" + Date.now());
         if (!resp.ok) return;
         const data = await resp.json();
-        if (data.url) {
+        if (data.url && isValidServer(data.url)) {
           const current = localStorage.getItem("rm_server_url");
-          if (!current || current.includes("trycloudflare.com") || current.includes("tail310336.ts.net")) {
+          // Only replace an auto-managed tunnel URL or the stable fallback —
+          // never clobber a URL the user explicitly saved in Settings.
+          if (!current || current.includes("trycloudflare.com") || current === FALLBACK_SERVER) {
             localStorage.setItem("rm_server_url", data.url);
             serverUrlEl.value = data.url;
           }
@@ -162,7 +187,7 @@
           show(data.detail || "Error: " + resp.status, "error");
         }
       } catch (err) {
-        show("Network error: " + err.message, "error");
+        show("Network error reaching " + server + " — " + err.message, "error");
       }
 
       sendBtn.disabled = false;
