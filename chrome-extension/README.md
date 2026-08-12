@@ -79,4 +79,6 @@ Requires a working `rmapi` on the machine (`rmapi ls /` should list your reMarka
 - Local PDFs (`file://`) are read in the browser and passed as base64: macOS TCC blocks the
   native host from reading `~/Downloads` directly. Needs "Allow access to file URLs"
   enabled for the extension.
+- arXiv PDF URLs are named from the paper title returned by arXiv's metadata API. If that
+  lookup is unavailable, the extension falls back to the PDF URL's filename.
 - Duplicate document names get ` (v2)`, ` (v3)` suffixes rather than overwriting.

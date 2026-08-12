@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
-    "test": "node --test \"test/**/*.test.mjs\""
+    "test": "node --test \"test/**/*.test.mjs\" && python3 -m unittest discover -s test -p 'test_*.py'"
   },
   "dependencies": {
     "@mozilla/readability": "^0.5.0"
