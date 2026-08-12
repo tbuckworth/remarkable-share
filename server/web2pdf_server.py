@@ -26,6 +26,7 @@ from web2pdf import (
     fetch_page, extract_article, clean_html, to_pdf, send_to_remarkable,
     slugify, sanitize_filename,
     google_doc_id, fetch_google_doc, extract_google_doc,
+    assert_fetchable, guarded_request, BlockedURLError,
 )
 
 # --- Config ---
@@ -215,10 +216,16 @@ async def convert_post(request: Request):
 
 
 def do_convert(url: str, folder: str = "/"):
-    import requests as req
-
     log = logging.getLogger("web2pdf")
     log.info(f"Converting: {url} -> folder={folder}")
+
+    # This server is publicly reachable, so it must never be usable as a proxy
+    # into the network it runs on. Reject before any fetch happens.
+    try:
+        assert_fetchable(url)
+    except BlockedURLError as exc:
+        log.warning(f"Blocked URL {url!r}: {exc}")
+        raise HTTPException(status_code=400, detail=f"URL not allowed: {exc}")
 
     try:
         # Check if URL points to a PDF — pass through directly
@@ -227,15 +234,18 @@ def do_convert(url: str, folder: str = "/"):
         if not is_pdf:
             # Check Content-Type with a HEAD request
             try:
-                head = req.head(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10, allow_redirects=True)
+                head = guarded_request("HEAD", url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
                 if "application/pdf" in head.headers.get("Content-Type", ""):
                     is_pdf = True
+            except BlockedURLError as exc:
+                log.warning(f"Blocked redirect from {url!r}: {exc}")
+                raise HTTPException(status_code=400, detail=f"URL not allowed: {exc}")
             except Exception:
                 pass
 
         if is_pdf:
             log.info(f"PDF detected, downloading directly: {url}")
-            resp = req.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+            resp = guarded_request("GET", url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
             resp.raise_for_status()
             # Use filename from Content-Disposition, or build from URL path
             cd = resp.headers.get("Content-Disposition", "")
@@ -266,7 +276,7 @@ def do_convert(url: str, folder: str = "/"):
             raw_html = fetch_google_doc(doc_id)
             title, content = extract_google_doc(raw_html)
         else:
-            raw_html = fetch_page(url)
+            raw_html = fetch_page(url, guard=True)
             title, content = extract_article(raw_html, url)
         log.info(f"Extracted: {title} ({len(content)} chars)")
         final_html = clean_html(content, title, url, raw_html, font_size="14pt")
