@@ -1,0 +1,18 @@
+[Unit]
+Description=web2pdf server for Send to reMarkable
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace YOURUSER with your Linux username, and the paths below with yours.
+User=YOURUSER
+# GODEBUG=netdns=cgo is required: rmapi hangs on Linux with Go's pure-Go DNS resolver.
+Environment=GODEBUG=netdns=cgo
+Environment=PATH=/home/YOURUSER/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/YOURUSER/web2pdf-env/bin/python3 /home/YOURUSER/remarkable-share/server/web2pdf_server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
