@@ -17,8 +17,9 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlencode, urlparse
 
 # Chrome launches native hosts without the user's PATH
 os.environ["PATH"] = os.path.expanduser("~/bin") + ":/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
@@ -26,6 +27,12 @@ os.environ["PATH"] = os.path.expanduser("~/bin") + ":/opt/homebrew/bin:/usr/loca
 os.environ["RMAPI_FORCE_SCHEMA_VERSION"] = "4"
 
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+ARXIV_ID_RE = re.compile(
+    r"(?:\d{4}\.\d{4,}|[a-z][a-z0-9.-]*/\d{7})(?:v\d+)?$",
+    re.IGNORECASE,
+)
+ATOM_NS = "http://www.w3.org/2005/Atom"
 
 CLEAN_CSS = """
 @page { size: A4; margin: 0; }
@@ -134,8 +141,49 @@ def sanitize_filename(title):
     return cleaned[:80] or "untitled"
 
 
+def arxiv_id_from_url(url):
+    """Return the identifier from an arXiv abstract/PDF URL, if present."""
+    try:
+        parsed = urlparse(url)
+        hostname = (parsed.hostname or "").lower()
+        if hostname != "arxiv.org" and not hostname.endswith(".arxiv.org"):
+            return None
+
+        path = unquote(parsed.path).strip("/")
+        kind, separator, paper_id = path.partition("/")
+        if separator != "/" or kind.lower() not in {"abs", "html", "pdf"}:
+            return None
+        paper_id = re.sub(r"\.pdf$", "", paper_id, flags=re.IGNORECASE)
+        return paper_id if ARXIV_ID_RE.fullmatch(paper_id) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def arxiv_title_from_url(url, opener=urllib.request.urlopen):
+    """Resolve an arXiv URL to its article title via the documented Atom API."""
+    paper_id = arxiv_id_from_url(url)
+    if not paper_id:
+        return None
+
+    api_url = "https://export.arxiv.org/api/query?" + urlencode({"id_list": paper_id})
+    request = urllib.request.Request(
+        api_url,
+        headers={"User-Agent": "remarkable-share/1.1 (personal metadata lookup)"},
+    )
+    try:
+        with opener(request, timeout=10) as response:
+            root = ET.fromstring(response.read())
+    except (ET.ParseError, OSError, TimeoutError, ValueError):
+        return None
+
+    title = root.findtext(f"{{{ATOM_NS}}}entry/{{{ATOM_NS}}}title", default="")
+    return " ".join(title.split()) or None
+
+
 def upload_pdf(url=None, data=None, title="untitled", folder="/"):
     """Upload a PDF to reMarkable. Accepts a URL or base64-encoded data."""
+    if url:
+        title = arxiv_title_from_url(url) or title
     clean_title = sanitize_filename(title)
 
     if folder != "/":
