@@ -137,7 +137,10 @@
       const token = localStorage.getItem("rm_token");
       if (!server || !token) return;
       try {
-        const resp = await fetch(server + "/folders?token=" + token);
+        // Header, not a query param: query strings land in server and proxy logs.
+        const resp = await fetch(server + "/folders", {
+          headers: { "Authorization": "Bearer " + token }
+        });
         const data = await resp.json();
         folderEl.innerHTML = '<option value="/">/  (root)</option>';
         (data.folders || []).forEach(f => {

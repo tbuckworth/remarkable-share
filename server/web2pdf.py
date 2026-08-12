@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -83,8 +85,70 @@ KATEX_HEAD = (
 )
 
 
-def fetch_page(url: str) -> str:
-    resp = requests.get(url, headers=HEADERS, timeout=30)
+# --- SSRF guard ---------------------------------------------------------------
+# Only relevant when something fetches a URL *chosen by someone else* — i.e. the
+# server. Run from the CLI on your own machine, fetching localhost is a feature,
+# so the guard is opt-in via guard=True rather than always on.
+
+
+class BlockedURLError(ValueError):
+    """A URL the server must not fetch on a caller's behalf."""
+
+
+def assert_fetchable(url: str) -> None:
+    """Reject non-HTTP schemes and hosts resolving off the public internet.
+
+    Without this, anyone who can reach /convert can use the server as a proxy
+    into the network it sits on — routers, printers, admin panels, metadata
+    endpoints.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise BlockedURLError(f"scheme {parsed.scheme or '(none)'!r} is not allowed")
+    if not parsed.hostname:
+        raise BlockedURLError("URL has no host")
+
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None)
+    except socket.gaierror as exc:
+        raise BlockedURLError(f"cannot resolve {parsed.hostname!r}") from exc
+
+    # Check *every* A/AAAA record: a host that resolves to one public and one
+    # private address must still be refused.
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            raise BlockedURLError(
+                f"{parsed.hostname} resolves to non-public address {ip}"
+            )
+
+
+def guarded_request(method: str, url: str, *, max_redirects: int = 5, **kwargs):
+    """requests.request, following redirects manually so each hop is validated.
+
+    requests' own redirect handling would check only the URL we started with,
+    leaving a public URL free to 302 into private space.
+    """
+    kwargs["allow_redirects"] = False
+    for _ in range(max_redirects + 1):
+        assert_fetchable(url)
+        resp = requests.request(method, url, **kwargs)
+        if resp.is_redirect or resp.is_permanent_redirect:
+            location = resp.headers.get("Location")
+            if not location:
+                return resp
+            url = urljoin(url, location)
+            continue
+        return resp
+    raise BlockedURLError(f"more than {max_redirects} redirects")
+
+
+def fetch_page(url: str, guard: bool = False) -> str:
+    if guard:
+        resp = guarded_request("GET", url, headers=HEADERS, timeout=30)
+    else:
+        resp = requests.get(url, headers=HEADERS, timeout=30)
     resp.raise_for_status()
     return resp.text
 
