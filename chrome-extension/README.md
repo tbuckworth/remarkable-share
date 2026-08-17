@@ -54,11 +54,28 @@ reload Gmail as well.
 
 1. `npm install && npm run build`
 2. `chrome://extensions` → Developer mode → **Load unpacked** → this directory
-3. `./install.sh <extension-id>` — registers the native messaging host (copy the ID from
-   the extensions page)
+3. `./install.sh` — registers the native messaging host
 4. Restart Chrome
 
 Requires a working `rmapi` on the machine (`rmapi ls /` should list your reMarkable).
+
+### Moving this directory changes the extension ID
+
+For an unpacked extension Chrome derives the ID from the **absolute install path**. Moving
+or renaming this directory therefore changes the ID: the native messaging host no longer
+recognises the extension, and the old entry in `chrome://extensions` points at a directory
+that doesn't exist, so clicking the toolbar icon gives `ERR_FILE_NOT_FOUND`. That is exactly
+what happened when the extension moved here out of `paper-review`.
+
+**After any move:** remove the stale entry, **Load unpacked** from the new location, run
+`./install.sh`, restart Chrome. `install.sh` computes the ID the same way Chrome does, so it
+needs no argument and can't drift out of sync with what the extensions page shows.
+
+This can be made permanent by adding a `key` (a DER-encoded RSA **public** key, base64) to
+`manifest.json` — Chrome then derives the ID from the key instead of the path, and moving
+the directory costs nothing. `install.sh` already prefers a `key` when one is present.
+Committing that blob trips the global gitleaks pre-commit hook, which reads it as a
+high-entropy generic secret; it would need an allowlist entry in `~/.gitleaks.toml` first.
 
 ## Layout
 
