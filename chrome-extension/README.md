@@ -102,8 +102,11 @@ high-entropy generic secret; it would need an allowlist entry in `~/.gitleaks.to
 ## Notes
 
 - Local PDFs (`file://`) are read in the browser and passed as base64: macOS TCC blocks the
-  native host from reading `~/Downloads` directly. Needs "Allow access to file URLs"
-  enabled for the extension.
+  native host from reading `~/Downloads` directly. Needs "Allow access to file URLs" enabled
+  on the extension's Details page. That toggle only appears because of the `file:///*` entry
+  in `host_permissions` — Chrome hides it from extensions that couldn't act on file URLs
+  anyway, so without it the popup's `fetch()` fails with "Not allowed to load local resource"
+  and there is no switch to flip.
 - arXiv PDF URLs are named from the paper title returned by arXiv's metadata API. If that
   lookup is unavailable, the extension falls back to the PDF URL's filename.
 - Duplicate document names get ` (v2)`, ` (v3)` suffixes rather than overwriting.

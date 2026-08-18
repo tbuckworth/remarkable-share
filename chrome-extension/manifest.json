@@ -4,6 +4,7 @@
   "version": "1.1",
   "description": "Convert web articles to clean PDFs and send to reMarkable",
   "permissions": ["activeTab", "storage", "scripting", "nativeMessaging", "contextMenus"],
+  "host_permissions": ["file:///*"],
   "background": {
     "service_worker": "dist/background.js"
   },
