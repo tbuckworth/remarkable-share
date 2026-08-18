@@ -59,6 +59,23 @@ reload Gmail as well.
 
 Requires a working `rmapi` on the machine (`rmapi ls /` should list your reMarkable).
 
+### `~/bin/rmapi` is a patched build — don't replace it with a stock release
+
+From 2026-08-17 the reMarkable cloud began rejecting any write whose root index
+isn't sorted by document ID, with `400 {"message":"invalid root schema"}`. Reads keep
+working, so the symptom is `rmapi ls` fine but every `put`/`mkdir` failing, and the
+extension surfacing it as `rmapi failed: ... status 400`. Nothing local causes it and
+no released rmapi fixes it — v0.0.34 and master are both affected
+([ddvk/rmapi#75](https://github.com/ddvk/rmapi/issues/75),
+[#76](https://github.com/ddvk/rmapi/issues/76)).
+
+`~/bin/rmapi` is therefore built from `ddvk/rmapi` master with
+[PR #77](https://github.com/ddvk/rmapi/pull/77) applied, which sorts the index at the
+two serialization points. The stock binary it replaced is kept at `~/bin/rmapi.bak`.
+
+Once PR #77 is merged and released, a normal install is fine again. Until then,
+`brew`/release upgrades will silently reintroduce the bug.
+
 ### Moving this directory changes the extension ID
 
 For an unpacked extension Chrome derives the ID from the **absolute install path**. Moving
