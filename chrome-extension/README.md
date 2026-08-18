@@ -71,6 +71,14 @@ what happened when the extension moved here out of `paper-review`.
 `./install.sh`, restart Chrome. `install.sh` computes the ID the same way Chrome does, so it
 needs no argument and can't drift out of sync with what the extensions page shows.
 
+**Watch which path you pick in the file dialog.** `~/pyg` is also reachable as `/Volumes/pyg`,
+an SMB mount of the *desktop's* copy of the same repos. Loading through that path makes it a
+different extension as far as Chrome is concerned (hence "Access to the specified native
+messaging host is forbidden"), runs the desktop's checkout against the local native host, and
+breaks whenever the share is unmounted. Prefer `/Users/titus/...` — ⌘⇧G in the picker lets you
+type a path. `install.sh` accepts several IDs (`./install.sh <id> <id>`) if you really do want
+both routes registered.
+
 This can be made permanent by adding a `key` (a DER-encoded RSA **public** key, base64) to
 `manifest.json` — Chrome then derives the ID from the key instead of the path, and moving
 the directory costs nothing. `install.sh` already prefers a `key` when one is present.
