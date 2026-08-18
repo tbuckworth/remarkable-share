@@ -17,30 +17,54 @@
 # Pass an ID explicitly only to override, e.g. to match what chrome://extensions
 # actually shows.
 
-set -e
+set -euo pipefail
 
 HOST_NAME="com.titus.web2pdf"
-EXT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# -P resolves symlinks: Chrome hashes the real path, so a symlinked parent would
+# otherwise give us an ID that doesn't match the one it shows.
+EXT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 HOST_PATH="$EXT_DIR/native-host/web2pdf_host.py"
 MANIFEST_DIR="$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
 
-if [ -n "$1" ]; then
+if [ ! -f "$HOST_PATH" ]; then
+  echo "error: native host not found at $HOST_PATH" >&2
+  exit 1
+fi
+
+if [ $# -gt 0 ] && [ -n "$1" ]; then
   EXT_ID="$1"
   ID_SOURCE="argument"
 else
-  read -r EXT_ID ID_SOURCE <<<"$(python3 - "$EXT_DIR" <<'PY'
-import base64, hashlib, json, os, sys
+  # Assign to a variable first: a failing python3 inside a here-string feeding
+  # `read` would not trip set -e, and we would register an empty ID.
+  ID_OUTPUT="$(python3 - "$EXT_DIR" <<'PY'
+import base64, binascii, hashlib, json, os, sys
 
 ext_dir = sys.argv[1]
-key = json.load(open(os.path.join(ext_dir, "manifest.json"))).get("key")
+manifest = os.path.join(ext_dir, "manifest.json")
+try:
+    key = json.load(open(manifest)).get("key")
+except (OSError, ValueError) as e:
+    sys.exit("cannot read %s: %s" % (manifest, e))
+
 if key:
-    seed, source = base64.b64decode(key), "manifest key"
+    try:
+        seed, source = base64.b64decode(key, validate=True), "manifest key"
+    except (binascii.Error, ValueError) as e:
+        sys.exit('manifest "key" is not valid base64: %s' % e)
 else:
     seed, source = ext_dir.encode(), "install path"
+
 digest = hashlib.sha256(seed).hexdigest()[:32]
 print("".join(chr(ord("a") + int(c, 16)) for c in digest), source)
 PY
 )"
+  read -r EXT_ID ID_SOURCE <<<"$ID_OUTPUT"
+fi
+
+if [ -z "$EXT_ID" ]; then
+  echo "error: could not determine the extension ID" >&2
+  exit 1
 fi
 
 mkdir -p "$MANIFEST_DIR"
