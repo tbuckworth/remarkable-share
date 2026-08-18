@@ -1,7 +1,11 @@
 #!/bin/bash
 # Install the native messaging host for the Send to reMarkable extension.
 #
-# Usage: ./install.sh [extension-id]
+# Usage: ./install.sh [extension-id ...]
+#
+# Accepts several IDs, because the same checkout can be loaded by more than one
+# route (e.g. a local path and an SMB mount of the same repo), and each route is
+# a different extension as far as Chrome is concerned.
 #
 # With no argument the extension ID is computed the same way Chrome computes it,
 # so the two can never disagree:
@@ -31,9 +35,12 @@ if [ ! -f "$HOST_PATH" ]; then
   exit 1
 fi
 
-if [ $# -gt 0 ] && [ -n "$1" ]; then
-  EXT_ID="$1"
-  ID_SOURCE="argument"
+EXT_IDS=()
+if [ $# -gt 0 ]; then
+  for arg in "$@"; do
+    [ -n "$arg" ] && EXT_IDS+=("$arg")
+  done
+  ID_SOURCE="arguments"
 else
   # Assign to a variable first: a failing python3 inside a here-string feeding
   # `read` would not trip set -e, and we would register an empty ID.
@@ -59,13 +66,21 @@ digest = hashlib.sha256(seed).hexdigest()[:32]
 print("".join(chr(ord("a") + int(c, 16)) for c in digest), source)
 PY
 )"
-  read -r EXT_ID ID_SOURCE <<<"$ID_OUTPUT"
+  read -r DERIVED_ID ID_SOURCE <<<"$ID_OUTPUT"
+  EXT_IDS=("$DERIVED_ID")
 fi
 
-if [ -z "$EXT_ID" ]; then
+if [ ${#EXT_IDS[@]} -eq 0 ] || [ -z "${EXT_IDS[0]}" ]; then
   echo "error: could not determine the extension ID" >&2
   exit 1
 fi
+
+ORIGINS=""
+for id in "${EXT_IDS[@]}"; do
+  [ -n "$ORIGINS" ] && ORIGINS="$ORIGINS,"
+  ORIGINS="$ORIGINS
+    \"chrome-extension://$id/\""
+done
 
 mkdir -p "$MANIFEST_DIR"
 
@@ -75,8 +90,7 @@ cat > "$MANIFEST_DIR/$HOST_NAME.json" <<EOF
   "description": "Send to reMarkable native messaging host",
   "path": "$HOST_PATH",
   "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://$EXT_ID/"
+  "allowed_origins": [$ORIGINS
   ]
 }
 EOF
@@ -84,6 +98,7 @@ EOF
 echo "Installed native messaging host:"
 echo "  Manifest: $MANIFEST_DIR/$HOST_NAME.json"
 echo "  Host: $HOST_PATH"
-echo "  Extension: $EXT_ID  (from $ID_SOURCE)"
+echo "  Extensions (from $ID_SOURCE):"
+for id in "${EXT_IDS[@]}"; do echo "    $id"; done
 echo ""
 echo "Restart Chrome for changes to take effect."
