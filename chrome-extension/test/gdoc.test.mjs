@@ -45,6 +45,12 @@ test("URL helpers", () => {
   assert.equal(googleDocExportUrl(DOC_URL), EXPORT_URL);
   assert.equal(googleDocTitle("test for remarkable - Google Docs"), "test for remarkable");
   assert.equal(googleDocTitle("", "fallback"), "fallback");
+  assert.equal(googleDocTitle("", ""), "untitled");
+  assert.equal(googleDocTitle(" - Google Docs"), "untitled");
+  const multi = "https://docs.google.com/document/u/1/d/abc123/edit";
+  assert.equal(isGoogleDoc(new URL(multi)), true);
+  assert.equal(googleDocId(multi), "abc123");
+  assert.equal(googleDocExportUrl(multi), "https://docs.google.com/document/u/1/d/abc123/export?format=html");
 });
 
 test("cleanGoogleDocExport strips Google styling but keeps emphasis and structure", () => {

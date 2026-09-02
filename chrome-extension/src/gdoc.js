@@ -5,7 +5,8 @@
 // Instead we ask Docs for its HTML export, which the content script can fetch
 // with the user's own cookies, and strip Google's styling back to structure.
 
-const DOC_PATH_RE = /^\/document\/d\/([^/]+)/;
+// Multi-account URLs carry a /u/<n>/ segment; keep it so the export hits the same account.
+const DOC_PATH_RE = /^\/document\/(u\/\d+\/)?d\/([^/]+)/;
 
 // Inline styling worth keeping: emphasis and super/subscript. Everything else
 // (Arial 11pt, colours, 72pt page padding, fixed image sizes) fights CLEAN_CSS.
@@ -20,21 +21,29 @@ export function googleDocId(url) {
   try {
     const u = new URL(url);
     if (u.hostname !== "docs.google.com") return null;
-    return DOC_PATH_RE.exec(u.pathname)?.[1] || null;
+    return DOC_PATH_RE.exec(u.pathname)?.[2] || null;
   } catch {
     return null;
   }
 }
 
 export function googleDocExportUrl(url) {
-  const id = googleDocId(url);
-  return id ? `https://docs.google.com/document/d/${id}/export?format=html` : null;
+  let m;
+  try {
+    const u = new URL(url);
+    if (u.hostname !== "docs.google.com") return null;
+    m = DOC_PATH_RE.exec(u.pathname);
+  } catch {
+    return null;
+  }
+  if (!m) return null;
+  return `https://docs.google.com/document/${m[1] || ""}d/${m[2]}/export?format=html`;
 }
 
 /** "My doc - Google Docs" → "My doc". */
 export function googleDocTitle(tabTitle, fallback = "untitled") {
   const t = (tabTitle || "").replace(/\s*-\s*Google Docs\s*$/, "").trim();
-  return t || fallback;
+  return t || (fallback || "").trim() || "untitled";
 }
 
 /** Google wraps outbound links in a redirect; unwrap so the PDF links go straight there. */
