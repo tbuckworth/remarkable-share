@@ -36,6 +36,19 @@ Gmail's class names are obfuscated and Google can change them. If extraction sta
 returning the wrong thing, the selectors in `src/gmail.js` are the place to look; the tests
 in `test/gmail.test.mjs` encode the DOM shape they expect.
 
+## Google Docs
+
+Readability can't extract from Google Docs either: the editor paints its text onto a
+canvas, so the DOM holds nothing readable and the result is garbage. `src/gdoc.js` instead
+fetches the document's HTML export (`/document/d/<id>/export?format=html`) from inside the
+tab, so your own login is used and private docs work. Google's styling (Arial 11 pt,
+colours, page padding, fixed image sizes) is stripped back to bold/italic/underline and
+super/subscript, and the result goes through the normal 14 pt Georgia render.
+
+Limits: Docs expresses nested lists as sibling lists, so nesting shows as indentation
+rather than true sub-lists, and the table of contents loses its indentation. Images are
+fetched by headless Chrome from Google's signed URLs at render time.
+
 ## Development
 
 ```bash
