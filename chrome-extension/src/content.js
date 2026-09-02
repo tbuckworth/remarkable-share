@@ -1,5 +1,6 @@
 import { Readability } from "@mozilla/readability";
 import { extractGmail, isGmail } from "./gmail.js";
+import { extractGoogleDoc, isGoogleDoc } from "./gdoc.js";
 
 function preserveMath(doc) {
   // CKEditor math elements (LessWrong): LaTeX in data-math-tex attribute
@@ -49,6 +50,15 @@ function install() {
     try {
       if (document.contentType === "application/pdf") {
         sendResponse({ pdf: true, url: location.href });
+        return true;
+      }
+
+      if (isGoogleDoc()) {
+        // Async: the export is fetched over the network. Return true below keeps
+        // the channel open until sendResponse fires.
+        extractGoogleDoc({ url: location.href, tabTitle: document.title })
+          .then((doc) => sendResponse(doc || { error: "Not a Google Doc" }))
+          .catch((e) => sendResponse({ error: e.message }));
         return true;
       }
 

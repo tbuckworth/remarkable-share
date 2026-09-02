@@ -70,7 +70,7 @@ rmapi ls /      # should list your reMarkable folders
 
 One click sends the current tab. Extraction runs **in the browser**, so pages behind a login
 work — including Gmail, which gets a dedicated extractor and a right-click "Send this email
-to reMarkable".
+to reMarkable", and Google Docs, which is fetched via its HTML export.
 
 > **macOS only as written.** `install.sh` writes Chrome's native-messaging manifest to the
 > macOS location, and `native-host/web2pdf_host.py` hardcodes the macOS Chrome path. It
