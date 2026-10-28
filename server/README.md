@@ -37,8 +37,10 @@ Start it once by hand to generate your auth token:
 ~/web2pdf-env/bin/python3 web2pdf_server.py
 ```
 
-On first run it creates `~/.config/web2pdf/config.json` with a freshly generated random
-token and prints it. **That token is the only thing protecting your server** once it is
+On first run it creates `~/.config/web2pdf/config.json` (mode 600) with a freshly generated
+random token. It prints where the token is, never the token itself, since under systemd its
+output goes to the journal. Read it with `python3 -m json.tool ~/.config/web2pdf/config.json`.
+**That token is the only thing protecting your server** once it is
 publicly exposed — treat it like a password, and put it in the PWA's Settings screen rather
 than into any file you might commit.
 

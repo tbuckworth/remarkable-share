@@ -7,6 +7,7 @@ Runs on the always-on desktop, reachable from Android via Tailscale.
 
 import json
 import logging
+import os
 import secrets
 import subprocess
 import tempfile
@@ -37,14 +38,25 @@ PORT = 8417
 
 
 def load_or_create_config() -> dict:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     if CONFIG_FILE.exists():
         return json.loads(CONFIG_FILE.read_text())
     token = secrets.token_hex(16)
     config = {"token": token}
-    CONFIG_FILE.write_text(json.dumps(config, indent=2))
-    print(f"Generated auth token: {token}")
+    # Mode 600 from the start: the token is the server's only protection.
+    fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps(config, indent=2))
+    # Never print the token itself: under systemd, stdout goes to the journal.
+    print(f"Generated a new auth token in {CONFIG_FILE} (mode 600).")
+    print(f"Copy its \"token\" value into the PWA's Settings screen: python3 -m json.tool {CONFIG_FILE}")
     return config
+
+
+def masked(token: str) -> str:
+    """Enough to tell two tokens apart in a log, not enough to use one."""
+    prefix = token[:4] if len(token) >= 16 else ""
+    return f"{prefix}… ({len(token)} chars)"
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -319,7 +331,6 @@ def do_convert(url: str, folder: str = "/"):
 
 
 if __name__ == "__main__":
-    print(f"Auth token: {AUTH_TOKEN}")
-    print(f"Config: {CONFIG_FILE}")
+    print(f"Auth token: {masked(AUTH_TOKEN)}, loaded from {CONFIG_FILE}")
     print(f"Tailscale: http://100.96.201.75:{PORT}")
     uvicorn.run(app, host="0.0.0.0", port=PORT)
