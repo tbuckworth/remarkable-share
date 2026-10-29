@@ -12,10 +12,40 @@ server. The Android path is the PWA at the root of this repo, which posts a URL 
 
 | | What it sends |
 |---|---|
-| Toolbar icon (or ⌘⇧E / Ctrl+Shift+E) | The current tab, with a folder picker |
-| Right-click → "Send this email to reMarkable" | On Gmail only: the message under the cursor, to the last-used folder |
+| Toolbar icon (or ⌘⇧E / Ctrl+Shift+E) | The current tab, with a folder picker, an optional "Why am I saving this?" note and a mode |
+| Right-click → "Send this email to reMarkable" | On Gmail only: the message under the cursor, to the last-used folder (no note, mode Auto) |
 
 Both go through `src/send.js`.
+
+## Why note and mode
+
+The popup has a one-line **"Why am I saving this?"** box (focused when the popup opens;
+Enter sends) and an **Auto / Work / Personal** choice, default Auto. Both are optional and
+neither is remembered between sends. The context menu has no UI, so it sends an empty note
+and `auto`.
+
+Every upload carries them to the native host along with the source URL and the send time,
+and the host writes them into the PDF's document-info dictionary so a job reading the
+reMarkable cloud copy can recover them:
+
+| Key | Value |
+|---|---|
+| `/Web2pdfNote` | The note, whitespace collapsed to one line, at most 500 chars; `""` when empty |
+| `/Web2pdfMode` | `auto`, `work` or `personal` (anything else becomes `auto`) |
+| `/Web2pdfUrl` | The page the send came from (the PDF URL, or `file://` path, for direct PDFs) |
+| `/Web2pdfSentAt` | Click time, ISO 8601 with a numeric offset, e.g. `2026-10-29T11:09:05+00:00` |
+| `/Subject` | The note, only when non-empty (an existing `/Subject` is otherwise left alone) |
+
+Other entries, `/Title` included, are kept as they were. For rendered articles `/Title` is
+whatever headless Chrome writes, which is the temporary HTML file's name, so don't read the
+title from there. Rendered articles also print `Why: <note>` under the title on page 1.
+Direct PDF uploads get the metadata only: a cover page would shift every page number.
+
+Writing metadata needs [`pypdf`](https://pypi.org/project/pypdf/) importable by the
+interpreter the host runs under (its `#!/usr/bin/env python3`, which under Chrome resolves
+to `/usr/bin/python3` on macOS). Without it, or for a PDF pypdf can't rewrite (encrypted,
+malformed), the host logs a warning to stderr, uploads the PDF unchanged, and the popup
+shows the warning after "Sent: ...". `/usr/bin/python3 -m pip install --user pypdf` adds it.
 
 ## Gmail
 
@@ -55,8 +85,11 @@ fetched by headless Chrome from Google's signed URLs at render time.
 npm install
 npm run build      # src/ -> dist/  (Chrome loads dist/, not src/)
 npm run watch      # rebuild on change
-npm test           # jsdom tests for the Gmail extractor
+npm test           # node:test + jsdom (Gmail, Docs, popup, send) and the host's unittest suite
 ```
+
+The jsdom tests need Node 20.19 or newer (jsdom 29). The host tests that need pypdf skip
+without it; the Chrome render test also needs a local Chrome.
 
 **Editing `src/` does nothing until you build**, and after building you must hit reload on
 the extension in `chrome://extensions`. Manifest changes (permissions, content scripts)
@@ -70,7 +103,8 @@ reload Gmail as well.
 3. `./install.sh` — registers the native messaging host
 4. Restart Chrome
 
-Requires a working `rmapi` on the machine (`rmapi ls /` should list your reMarkable).
+Requires a working `rmapi` on the machine (`rmapi ls /` should list your reMarkable), and
+`pypdf` for the why-note metadata (see [Why note and mode](#why-note-and-mode)).
 
 ### `~/bin/rmapi` is a patched build — don't replace it with a stock release
 
@@ -122,11 +156,13 @@ high-entropy generic secret; it would need an allowlist entry in `~/.gitleaks.to
 | `manifest.json` | MV3 manifest; this directory is what's loaded unpacked |
 | `src/gmail.js` | Gmail message extraction |
 | `src/content.js` | Runs in the page: Gmail extractor, else Readability + math preservation |
-| `src/send.js` | Shared extract → upload pipeline |
-| `src/popup.js` | Toolbar popup: folder list, send button, local-PDF passthrough |
+| `src/send.js` | Shared extract → upload pipeline; adds note, mode, source URL, send time |
+| `src/popup.js` | Toolbar popup: folder list, why-note and mode, send button, local-PDF passthrough |
 | `src/background.js` | Service worker: context menu, badge feedback |
-| `native-host/web2pdf_host.py` | Renders HTML → PDF with headless Chrome, uploads via `rmapi` |
+| `native-host/web2pdf_host.py` | Renders HTML → PDF with headless Chrome, writes the why-note metadata, uploads via `rmapi` |
 | `test/gmail.test.mjs` | jsdom tests over Gmail-shaped fixtures |
+| `test/send.test.mjs`, `test/popup.test.mjs` | Every upload message carries the why-note fields; the popup wires them up |
+| `test/test_web2pdf_host.py` | Host: arXiv titles, metadata written and read back, `Why:` line, degradation without pypdf |
 | `dist/` | Build output — what Chrome actually runs |
 
 ## Notes
