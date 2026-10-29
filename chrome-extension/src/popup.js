@@ -1,4 +1,4 @@
-import { isPdfUrl, nativeMessage, sendTab, titleFromPdfUrl, toFolderPath } from "./send.js";
+import { isPdfUrl, nativeMessage, provenance, sendTab, titleFromPdfUrl, toFolderPath } from "./send.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -20,10 +20,28 @@ function showStatus(msg, type) {
   el.className = `status ${type}`;
 }
 
+/** The why-note and mode as entered; both optional. */
+function whyOptions() {
+  return {
+    note: $("note").value,
+    mode: document.querySelector('input[name="mode"]:checked')?.value || "auto",
+  };
+}
+
+function sentMessage(result) {
+  // A warning means it uploaded but without the why-note metadata.
+  return result.warning ? `Sent: ${result.title} (${result.warning})` : `Sent: ${result.title}`;
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   // Get current tab
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   $("url").textContent = tab?.url || "";
+  // Open, type why, Enter: the note is the only thing worth typing here.
+  $("note").focus();
+  $("note").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing && !$("send").disabled) $("send").click();
+  });
 
   // Load folders
   try {
@@ -76,18 +94,20 @@ document.addEventListener("DOMContentLoaded", async () => {
           data,
           title: titleFromPdfUrl(tab.url),
           folder: toFolderPath(folder),
+          ...provenance({ ...whyOptions(), sourceUrl: tab.url }),
         });
-        showStatus(`Sent: ${result.title}`, "success");
+        showStatus(sentMessage(result), "success");
         return;
       }
 
       const result = await sendTab(tab, folder, {
+        ...whyOptions(),
         onStatus: (msg) => {
           $("send").textContent = msg.startsWith("Extracting") ? "Extracting..." : "Uploading...";
           showStatus(msg, "loading");
         },
       });
-      showStatus(`Sent: ${result.title}`, "success");
+      showStatus(sentMessage(result), "success");
     } catch (e) {
       showStatus(`Error: ${e.message}`, "error");
     } finally {

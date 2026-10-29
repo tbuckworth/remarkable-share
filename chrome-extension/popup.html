@@ -7,6 +7,10 @@
   .url { word-break: break-all; color: #666; font-size: 12px; margin-bottom: 12px; max-height: 36px; overflow: hidden; }
   label { font-weight: 600; display: block; margin-bottom: 4px; margin-top: 8px; font-size: 13px; }
   select { width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 4px; }
+  input[type="text"] { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font: inherit; font-size: 13px; }
+  .modes { display: flex; gap: 14px; margin-top: 6px; font-size: 13px; }
+  .modes label { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-weight: normal; cursor: pointer; }
+  .modes input { margin: 0; }
   button { width: 100%; padding: 10px; background: #111; color: white; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 10px; }
   button:hover { background: #333; }
   button:disabled { background: #999; cursor: not-allowed; }
@@ -24,6 +28,13 @@
     <div class="url" id="url"></div>
     <label for="folder">Folder</label>
     <select id="folder"><option value="/">/</option></select>
+    <label for="note">Why am I saving this?</label>
+    <input type="text" id="note" maxlength="500" placeholder="Optional" autocomplete="off">
+    <div class="modes" role="radiogroup" aria-label="Mode">
+      <label><input type="radio" name="mode" value="auto" checked>Auto</label>
+      <label><input type="radio" name="mode" value="work">Work</label>
+      <label><input type="radio" name="mode" value="personal">Personal</label>
+    </div>
     <button id="send">Send to reMarkable</button>
     <div class="status" id="status"></div>
   </div>

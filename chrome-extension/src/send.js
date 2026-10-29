@@ -40,6 +40,37 @@ export function toFolderPath(folder) {
   return folder.startsWith("/") ? folder : `/${folder}`;
 }
 
+/** Reading modes the popup offers; the host falls back to "auto" for anything else. */
+export const MODES = ["auto", "work", "personal"];
+
+/**
+ * Local time with a numeric UTC offset, e.g. 2026-10-29T11:09:05+00:00.
+ * toISOString() would give a trailing Z, which Python < 3.11 can't parse.
+ */
+export function isoWithOffset(date = new Date()) {
+  const pad = (n) => String(Math.trunc(Math.abs(n))).padStart(2, "0");
+  const offset = -date.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
+    `${sign}${pad(offset / 60)}:${pad(offset % 60)}`
+  );
+}
+
+/**
+ * The why-note fields every upload message carries. The host writes them into the
+ * PDF's metadata (/Web2pdfNote, /Web2pdfMode, /Web2pdfUrl, /Web2pdfSentAt).
+ */
+export function provenance({ note = "", mode = "auto", sourceUrl = "", now = new Date() } = {}) {
+  return {
+    note: String(note ?? "").replace(/\s+/g, " ").trim(),
+    mode: MODES.includes(mode) ? mode : "auto",
+    source_url: sourceUrl || "",
+    sent_at: isoWithOffset(now),
+  };
+}
+
 /** The Gmail extractor supplies its own meta line; articles get one built here. */
 function metaLine(article) {
   if (article.meta) return article.meta;
@@ -57,12 +88,17 @@ function metaLine(article) {
  * @param {string} folder rmapi folder path
  * @param {object} [opts]
  * @param {boolean} [opts.useContextTarget] target the right-clicked message
+ * @param {string} [opts.note] "Why am I saving this?" — empty when there's no UI
+ * @param {string} [opts.mode] one of MODES
  * @param {(msg: string) => void} [opts.onStatus]
- * @returns {Promise<{title: string}>}
+ * @returns {Promise<{title: string, warning?: string}>}
  */
 export async function sendTab(tab, folder, opts = {}) {
-  const { useContextTarget = false, onStatus = () => {} } = opts;
+  const { useContextTarget = false, note = "", mode = "auto", onStatus = () => {} } = opts;
   const targetFolder = toFolderPath(folder);
+  // Stamp the click, not whenever extraction finishes.
+  const now = new Date();
+  const stamp = (sourceUrl) => provenance({ note, mode, sourceUrl, now });
 
   if (isPdfUrl(tab.url)) {
     onStatus("PDF detected — uploading directly...");
@@ -71,6 +107,7 @@ export async function sendTab(tab, folder, opts = {}) {
       url: tab.url,
       title: titleFromPdfUrl(tab.url),
       folder: targetFolder,
+      ...stamp(tab.url),
     });
   }
 
@@ -90,6 +127,7 @@ export async function sendTab(tab, folder, opts = {}) {
       url: article.url,
       title: titleFromPdfUrl(article.url),
       folder: targetFolder,
+      ...stamp(article.url),
     });
   }
 
@@ -103,5 +141,6 @@ export async function sendTab(tab, folder, opts = {}) {
     content: article.content,
     meta: metaLine(article),
     folder: targetFolder,
+    ...stamp(article.url || tab.url),
   });
 }
