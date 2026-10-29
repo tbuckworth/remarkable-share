@@ -29,9 +29,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   await badge("…", "#1e40af");
   try {
     const { lastFolder } = await chrome.storage.local.get("lastFolder");
-    const result = await sendTab(tab, lastFolder || "/", { useContextTarget: true });
+    // No UI on this path, so no why-note: the PDF is stamped with mode "auto".
+    const result = await sendTab(tab, lastFolder || "/", { useContextTarget: true, note: "", mode: "auto" });
     await badge("✓", "#166534");
     console.log(`Sent to reMarkable: ${result.title}`);
+    if (result.warning) console.warn(`Send to reMarkable: ${result.warning}`);
   } catch (e) {
     await badge("✗", "#991b1b");
     console.error("Send to reMarkable failed:", e);
