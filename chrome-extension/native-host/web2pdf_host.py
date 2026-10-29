@@ -18,6 +18,7 @@ import sys
 import tempfile
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlencode, urlparse
 
@@ -27,6 +28,13 @@ os.environ["PATH"] = os.path.expanduser("~/bin") + ":/opt/homebrew/bin:/usr/loca
 os.environ["RMAPI_FORCE_SCHEMA_VERSION"] = "4"
 
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# rmapi names the document after the file, so the PDF must sit at <dir>/<doc name>.pdf.
+PDF_DIR = "/tmp"
+
+# Why-note provenance written into every uploaded PDF's document-info dictionary,
+# for the desktop's nightly reader of the reMarkable cloud copies.
+MODES = ("auto", "work", "personal")
+NOTE_MAX_CHARS = 500
 
 ARXIV_ID_RE = re.compile(
     r"(?:\d{4}\.\d{4,}|[a-z][a-z0-9.-]*/\d{7})(?:v\d+)?$",
@@ -61,6 +69,7 @@ ul, ol { margin: 0.5em 0; padding-left: 1.5em; }
 li { margin: 0.2em 0; }
 .title-block { margin-bottom: 1em; border-bottom: 1px solid #ccc; padding-bottom: 0.5em; }
 .title-block .meta { font-size: 9pt; color: #666; margin-top: 0.3em; }
+.title-block .why { font-size: 11pt; font-style: italic; margin-top: 0.3em; }
 """
 
 KATEX_HEAD = (
@@ -71,6 +80,11 @@ KATEX_HEAD = (
     '{left:\'$$\',right:\'$$\',display:true},'
     '{left:\'$\',right:\'$\',display:false}]});"></script>'
 )
+
+
+def log(message):
+    # stdout carries the native-messaging protocol; diagnostics must go to stderr.
+    print(f"web2pdf_host: {message}", file=sys.stderr, flush=True)
 
 
 def read_message():
@@ -101,23 +115,30 @@ def get_folders():
     return folders
 
 
-def render_pdf(html_content, title, meta, output_path):
-    """Render clean HTML to PDF using headless Chrome."""
+def build_html(html_content, title, meta, note=""):
+    """The page headless Chrome prints: title block, then the extracted content."""
     # Email subjects routinely contain & and <, which would corrupt the markup.
     safe_title = html.escape(title or "")
     safe_meta = html.escape(meta or "")
+    note = (note or "").strip()
+    why = f'\n<div class="why">Why: {html.escape(note)}</div>' if note else ""
 
-    full_html = f"""<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{CLEAN_CSS}</style>
 {KATEX_HEAD}
 </head>
 <body>
 <div class="title-block">
 <h1>{safe_title}</h1>
-<div class="meta">{safe_meta}</div>
+<div class="meta">{safe_meta}</div>{why}
 </div>
 {html_content}
 </body></html>"""
+
+
+def render_pdf(html_content, title, meta, output_path, note=""):
+    """Render clean HTML to PDF using headless Chrome."""
+    full_html = build_html(html_content, title, meta, note)
 
     with tempfile.NamedTemporaryFile(suffix=".html", mode="w", delete=False, encoding="utf-8") as f:
         f.write(full_html)
@@ -132,6 +153,102 @@ def render_pdf(html_content, title, meta, output_path):
             raise RuntimeError("Chrome PDF rendering failed")
     finally:
         Path(tmp_html).unlink(missing_ok=True)
+
+
+def clean_note(note):
+    """One line, bounded: the popup's input is single-line, but don't trust it."""
+    return " ".join(str(note or "").split())[:NOTE_MAX_CHARS]
+
+
+def clean_mode(mode):
+    mode = str(mode or "").strip().lower()
+    return mode if mode in MODES else "auto"
+
+
+def clean_sent_at(sent_at, now=None):
+    """ISO 8601 with a numeric UTC offset (2026-10-29T11:09:05+00:00).
+
+    Python before 3.11 can't parse a trailing Z, and the reader may run on one, so
+    normalise whatever the extension sent. Missing, naive or garbled -> host's now.
+    """
+    if sent_at:
+        try:
+            parsed = datetime.fromisoformat(re.sub(r"[Zz]$", "+00:00", str(sent_at).strip()))
+            if parsed.tzinfo is not None:
+                return parsed.isoformat(timespec="seconds")
+        except ValueError:
+            pass
+    return (now or datetime.now().astimezone()).isoformat(timespec="seconds")
+
+
+def read_provenance(msg, fallback_url=""):
+    """Note, mode, source URL and send time from an upload message, cleaned."""
+    return {
+        "note": clean_note(msg.get("note")),
+        "mode": clean_mode(msg.get("mode")),
+        "source_url": str(msg.get("source_url") or fallback_url or ""),
+        "sent_at": clean_sent_at(msg.get("sent_at")),
+    }
+
+
+def pdf_info(prov):
+    """Document-info entries for a provenance dict. /Title is deliberately absent."""
+    info = {
+        "/Web2pdfNote": prov["note"],
+        "/Web2pdfMode": prov["mode"],
+        "/Web2pdfUrl": prov["source_url"],
+        "/Web2pdfSentAt": prov["sent_at"],
+    }
+    if prov["note"]:
+        info["/Subject"] = prov["note"]
+    return info
+
+
+def write_pdf_metadata(pdf_path, info):
+    """Merge info into the PDF's document-info dictionary, in place.
+
+    Existing entries (/Title, /Author, ...) are kept. Returns None on success, or a
+    warning string when the PDF was left untouched: metadata is a nice-to-have and
+    must never block the upload.
+    """
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except ImportError:
+        warning = f"pypdf not importable by {sys.executable}; uploaded without why-note metadata"
+        log(warning)
+        return warning
+
+    tmp_path = f"{pdf_path}.meta-tmp"
+    try:
+        reader = PdfReader(pdf_path)
+        if reader.is_encrypted:
+            raise ValueError("PDF is encrypted")
+        writer = PdfWriter(clone_from=reader)
+        writer.add_metadata(info)
+        with open(tmp_path, "wb") as f:
+            writer.write(f)
+        os.replace(tmp_path, pdf_path)
+        return None
+    except Exception as e:
+        Path(tmp_path).unlink(missing_ok=True)
+        warning = f"could not write PDF metadata ({type(e).__name__}: {e}); uploaded without it"
+        log(warning)
+        return warning
+
+
+def put_pdf(pdf_path, doc_name, folder, prov):
+    """Stamp the why-note metadata, then hand the PDF to rmapi."""
+    warning = write_pdf_metadata(pdf_path, pdf_info(prov))
+    result = subprocess.run(
+        ["rmapi", "put", pdf_path, folder],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        return {"error": f"rmapi failed: {result.stderr.strip()}"}
+    response = {"status": "ok", "title": doc_name}
+    if warning:
+        response["warning"] = warning
+    return response
 
 
 def sanitize_filename(title):
@@ -180,8 +297,13 @@ def arxiv_title_from_url(url, opener=urllib.request.urlopen):
     return " ".join(title.split()) or None
 
 
-def upload_pdf(url=None, data=None, title="untitled", folder="/"):
-    """Upload a PDF to reMarkable. Accepts a URL or base64-encoded data."""
+def upload_pdf(url=None, data=None, title="untitled", folder="/", prov=None):
+    """Upload a PDF to reMarkable. Accepts a URL or base64-encoded data.
+
+    The PDF itself is not altered beyond its metadata: a cover page would shift
+    every page number.
+    """
+    prov = prov or read_provenance({}, fallback_url=url)
     if url:
         title = arxiv_title_from_url(url) or title
     clean_title = sanitize_filename(title)
@@ -196,7 +318,7 @@ def upload_pdf(url=None, data=None, title="untitled", folder="/"):
         doc_name = f"{clean_title} (v{n})"
         n += 1
 
-    pdf_path = f"/tmp/{doc_name}.pdf"
+    pdf_path = os.path.join(PDF_DIR, f"{doc_name}.pdf")
     try:
         if data:
             Path(pdf_path).write_bytes(base64.b64decode(data))
@@ -213,19 +335,13 @@ def upload_pdf(url=None, data=None, title="untitled", folder="/"):
         if not Path(pdf_path).exists() or Path(pdf_path).stat().st_size == 0:
             return {"error": "Failed to retrieve PDF"}
 
-        result = subprocess.run(
-            ["rmapi", "put", pdf_path, folder],
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode == 0:
-            return {"status": "ok", "title": doc_name}
-        else:
-            return {"error": f"rmapi failed: {result.stderr.strip()}"}
+        return put_pdf(pdf_path, doc_name, folder, prov)
     finally:
         Path(pdf_path).unlink(missing_ok=True)
 
 
-def upload(title, html_content, meta, folder="/"):
+def upload(title, html_content, meta, folder="/", prov=None):
+    prov = prov or read_provenance({})
     clean_title = sanitize_filename(title)
 
     # Check for duplicate names
@@ -239,17 +355,10 @@ def upload(title, html_content, meta, folder="/"):
         doc_name = f"{clean_title} (v{n})"
         n += 1
 
-    pdf_path = f"/tmp/{doc_name}.pdf"
+    pdf_path = os.path.join(PDF_DIR, f"{doc_name}.pdf")
     try:
-        render_pdf(html_content, title, meta, pdf_path)
-        result = subprocess.run(
-            ["rmapi", "put", pdf_path, folder],
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode == 0:
-            return {"status": "ok", "title": doc_name}
-        else:
-            return {"error": f"rmapi failed: {result.stderr.strip()}"}
+        render_pdf(html_content, title, meta, pdf_path, note=prov["note"])
+        return put_pdf(pdf_path, doc_name, folder, prov)
     finally:
         Path(pdf_path).unlink(missing_ok=True)
 
@@ -269,12 +378,14 @@ def main():
                 url=msg.get("url"), data=msg.get("data"),
                 title=msg.get("title", "untitled"),
                 folder=msg.get("folder", "/"),
+                prov=read_provenance(msg, fallback_url=msg.get("url")),
             )
             send_message(result)
         elif action == "upload":
             result = upload(
                 msg["title"], msg["content"], msg.get("meta", ""),
                 msg.get("folder", "/"),
+                prov=read_provenance(msg),
             )
             send_message(result)
         else:
